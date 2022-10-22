@@ -80,7 +80,7 @@ def log(message: str, log_type: Log_Type) -> None:
     ]
     print(colored(custom_fmt[log_type.value].format(message), colors[log_type.value]))
 
-def sizeof_fmt(num, suffix="B"):
+def sizeof_fmt(num: int, suffix="B") -> str:
     # SOURCE: https://stackoverflow.com/a/1094933/20198921
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
         if abs(num) < 1024.0:
@@ -236,40 +236,40 @@ def parse_args() -> argparse.Namespace:
         args.username = 'library'
     return args
 
-def get_image_os(tag):
+def get_image_os(tag: dict) -> str:
     os = tag['image_os'] or ''
     os += tag['image_os_features'] or ''
     os += tag['image_os_version'] or ''
     return os
 
-def get_image_arch(tag):
+def get_image_arch(tag: dict) -> str:
     arch = tag['image_architecture'] or ''
     arch += tag['image_features'] or ''
     arch += tag['image_variant'] or ''
     return arch
 
-def filter_tags(tags, pattern):
+def filter_tags(tags: List[dict], pattern: str) -> List[dict]:
     if not pattern:
         return tags
 
     return [tag for tag in tags if
         re.match(pattern, tag['name'], re.IGNORECASE)]
 
-def filter_arch(tags, pattern):
+def filter_arch(tags: List[dict], pattern: str) -> List[dict]:
     if not pattern:
         return tags
 
     return [tag for tag in tags if
         re.match(pattern, get_image_arch(tag), re.IGNORECASE)]
 
-def filter_os(tags, pattern):
+def filter_os(tags: List[dict], pattern: str) -> List[dict]:
     if not pattern:
         return tags
 
     return [tag for tag in tags if
         re.match(pattern, get_image_os(tag), re.IGNORECASE)]
 
-def expand_tags(tags):
+def expand_tags(tags: List[dict]) -> List[dict]:
     for tag in tags:
         for image in tag['images']:
             yield {**tag, **dict(map(lambda x: ('image_'+x[0], x[1]),image.items()))}
@@ -288,7 +288,7 @@ def main(args):
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
-    print()
+    print("")
     print(tabulate.tabulate(map(lambda tag: [
         tag['name'],
         get_image_os(tag),
