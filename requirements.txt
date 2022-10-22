@@ -1,0 +1,4 @@
+requests_cache
+termcolor
+tabulate
+
