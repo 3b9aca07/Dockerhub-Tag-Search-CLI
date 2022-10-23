@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import json
 import os
 import re
@@ -23,13 +24,14 @@ VERBOSE = False
 QUIET = False
 EXAMPLE_USAGE = '''
 Examples:
-    {0} apache
     {0} mysql
     {0} mitmproxy/mitmproxy
     {0} -u mitmproxy mitmproxy
     {0} nginx -n 1.23*alpine*perl*
     {0} nginx -r '1\.2[0-3].*alpine.*perl.*'
     {0} httpd -n '*alpine*' --architecture '*arm64*'
+    {0} python -s -r "3\.[67].*alpine.*" --architecture amd64
+    {0} python -r "3\.(?:[89]|10).*alpine.*" --format json --architecture amd64 --operating-system linux | jq '.[] | .name + ";" + (.image_size|tostring) + ";" + (.image_size/1024/1024|floor|tostring) + "MB;" + .image_digest' | sort -t';' -k2
 '''.format(os.path.basename(__file__))
 
 # https://hub.docker.com/v2/repositories/<username>/<image>/tags?page_size=<N>&page=<N>
@@ -54,6 +56,11 @@ class Log_Type(Enum):
     WARNING     = 0x02
     INFORMATION = 0x03
     DEBUG       = 0x04
+
+class Format(Enum):
+    TABLE = 0
+    JSON = 1
+    CSV = 2
 
 class ArgumentParserImplicitHelp(argparse.ArgumentParser):
     def error(self, message):
@@ -197,6 +204,19 @@ def parse_args() -> argparse.Namespace:
              'E.g.: linux, windows, etc.'
     )
     parser.add_argument(
+        '-s',
+        '--sort',
+        action='store_true',
+        help='Sort by image size increasing order.'
+    )
+    parser.add_argument(
+        '-f',
+        '--format',
+        choices=[x.name.lower() for x in Format],
+        default=Format.TABLE.name,
+        help='Specify the output format.'
+    )
+    parser.add_argument(
         '-v',
         '--verbose',
         action='store_true',
@@ -229,6 +249,10 @@ def parse_args() -> argparse.Namespace:
 
     args.operating_system = wildcard_match_to_regex(args.operating_system)
     args.architecture = wildcard_match_to_regex(args.architecture)
+
+    args.format = Format[args.format.upper()]
+    if args.format in [Format.CSV, Format.JSON]:
+        args.quiet = True
 
     VERBOSE = args.verbose
     QUIET = args.quiet
@@ -270,9 +294,31 @@ def filter_os(tags: List[dict], pattern: str) -> List[dict]:
         re.match(pattern, get_image_os(tag), re.IGNORECASE)]
 
 def expand_tags(tags: List[dict]) -> List[dict]:
+    return [
+        {
+            **tag,
+            **dict(map(lambda x: ('image_'+x[0], x[1]), image.items()))
+        }
+        for tag in tags for image in tag['images']
+    ]
+
+def table_print_tags(tags):
+    print("")
+    print(tabulate.tabulate(map(lambda tag: [
+        tag['name'],
+        get_image_os(tag),
+        get_image_arch(tag),
+        tag['image_last_pushed'] or '',
+        sizeof_fmt(tag['image_size']),
+        '{}'.format(tag['image_size'])
+    ], tags), headers=['Tag', 'OS', 'Arch', 'Last pushed', 'Size', 'Bytes'], tablefmt='orgtbl'))
+
+def csv_print_tags(tags):
+    fields = tags[0].keys()
+    stdout_writer = csv.DictWriter(sys.stdout, fieldnames=fields)
+    stdout_writer.writeheader()
     for tag in tags:
-        for image in tag['images']:
-            yield {**tag, **dict(map(lambda x: ('image_'+x[0], x[1]),image.items()))}
+        stdout_writer.writerow({k: (tag[k] if k in tag else None) for k in fields})
 
 def main(args):
     tags = list(map(lambda tag: defaultdict(None, tag), retrieve_tags(
@@ -287,22 +333,21 @@ def main(args):
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
-    tags = list(tags)
+    if args.sort:
+        tags = sorted(tags, key=lambda tag: int(tag['image_size']))
     log('{} number of tags found!'.format(len(tags)), Log_Type.INFORMATION)
 
-    print("")
-    print(tabulate.tabulate(map(lambda tag: [
-        tag['name'],
-        get_image_os(tag),
-        get_image_arch(tag),
-        tag['image_last_pushed'] or '',
-        sizeof_fmt(tag['image_size']),
-        '{}'.format(tag['image_size'])
-    ], tags), headers=['Tag', 'OS', 'Arch', 'Last pushed', 'Size', 'Bytes'], tablefmt='orgtbl'))
-
+    if args.format == Format.TABLE:
+        table_print_tags(tags)
+    elif args.format == Format.JSON:
+        print(json.dumps(tags))
+    elif args.format == Format.CSV:
+        csv_print_tags(tags)
 
 if __name__ == '__main__':
     try:
         main(parse_args())
+    except BrokenPipeError:
+        pass
     finally:
         pass
