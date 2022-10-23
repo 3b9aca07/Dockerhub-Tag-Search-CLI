@@ -320,6 +320,11 @@ def csv_print_tags(tags):
     for tag in tags:
         stdout_writer.writerow({k: (tag[k] if k in tag else None) for k in fields})
 
+def get_number_of_tags_and_images(tags):
+    n_tags = len(set(tag['name'] for tag in tags))
+    n_images = len(tags)
+    return n_tags, n_images
+
 def main(args):
     tags = list(map(lambda tag: defaultdict(None, tag), retrieve_tags(
         image_name=args.image,
@@ -335,7 +340,10 @@ def main(args):
     tags = filter_os(tags, args.operating_system)
     if args.sort:
         tags = sorted(tags, key=lambda tag: int(tag['image_size']))
-    log('{} number of tags found!'.format(len(tags)), Log_Type.INFORMATION)
+
+    n_tags, n_images = get_number_of_tags_and_images(tags)
+    log('Number of tags:   {}'.format(n_tags), Log_Type.INFORMATION)
+    log('Number of images: {}'.format(n_images), Log_Type.INFORMATION)
 
     if args.format == Format.TABLE:
         table_print_tags(tags)
