@@ -296,7 +296,7 @@ def filter_os(tags: List[dict], pattern: str) -> List[dict]:
 def expand_tags(tags: List[dict]) -> List[dict]:
     return [
         {
-            **tag,
+            **{k: v for k, v in tag.items() if k != 'images'},
             **dict(map(lambda x: ('image_'+x[0], x[1]), image.items()))
         }
         for tag in tags for image in tag['images']
