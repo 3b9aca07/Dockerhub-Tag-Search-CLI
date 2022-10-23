@@ -280,7 +280,6 @@ def main(args):
         username=args.username,
         page_size=100
     )))
-    log('{} number of tags found!'.format(len(tags)), Log_Type.INFORMATION)
     if not tags:
         return
 
@@ -288,6 +287,8 @@ def main(args):
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
+    log('{} number of tags found!'.format(len(tags)), Log_Type.INFORMATION)
+
     print("")
     print(tabulate.tabulate(map(lambda tag: [
         tag['name'],
