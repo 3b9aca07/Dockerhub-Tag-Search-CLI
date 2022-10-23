@@ -287,6 +287,7 @@ def main(args):
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
+    tags = list(tags)
     log('{} number of tags found!'.format(len(tags)), Log_Type.INFORMATION)
 
     print("")
