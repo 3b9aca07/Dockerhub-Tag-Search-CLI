@@ -308,10 +308,14 @@ def table_print_tags(tags):
         tag['name'],
         get_image_os(tag),
         get_image_arch(tag),
-        tag['image_last_pushed'] or '',
+        tag['image_last_pushed'] if tag['image_last_pushed'] else tag['tag_last_pushed'],
         sizeof_fmt(tag['image_size']),
-        '{}'.format(tag['image_size'])
-    ], tags), headers=['Tag', 'OS', 'Arch', 'Last pushed', 'Size', 'Bytes'], tablefmt='orgtbl'))
+        '{}'.format(tag['image_size']),
+        '{}..'.format(tag['image_digest'][:24]) if tag['image_digest'] else ''
+    ], tags), headers=[
+        'Tag', 'OS', 'Arch', 'Last pushed',
+        'Size', 'Bytes', 'Digest'
+    ], tablefmt='orgtbl'))
 
 def csv_print_tags(tags):
     fields = tags[0].keys()
@@ -326,15 +330,15 @@ def get_number_of_tags_and_images(tags):
     return n_tags, n_images
 
 def main(args):
-    tags = list(map(lambda tag: defaultdict(None, tag), retrieve_tags(
+    tags = retrieve_tags(
         image_name=args.image,
         username=args.username,
         page_size=100
-    )))
+    )
     if not tags:
         return
 
-    tags = expand_tags(tags)
+    tags = map(lambda tag: defaultdict(lambda: None, tag), expand_tags(tags))
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
