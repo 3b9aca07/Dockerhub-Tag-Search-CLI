@@ -338,7 +338,7 @@ def main(args):
     if not tags:
         return
 
-    tags = map(lambda tag: defaultdict(lambda: None, tag), expand_tags(tags))
+    tags = list(map(lambda tag: defaultdict(lambda: None, tag), expand_tags(tags)))
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
