@@ -68,7 +68,7 @@ class StatusCodeException(Exception):
 
 # ===== [ FUNCTIONS ] =====
 def log(message: str, log_type: Log_Type) -> None:
-    if QUIET and log_type in [Log_Type.DEBUG, Log_Type.INFORMATINO]:
+    if QUIET and log_type in [Log_Type.DEBUG, Log_Type.INFORMATION]:
         return
 
     if not VERBOSE and log_type == Log_Type.DEBUG:
