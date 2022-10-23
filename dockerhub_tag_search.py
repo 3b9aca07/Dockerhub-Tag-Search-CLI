@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import ciso8601
 import csv
 import json
+import humanfriendly
+import math
 import os
 import re
 import requests
@@ -13,7 +16,7 @@ import traceback
 import urllib
 
 from collections import defaultdict
-from datetime import timedelta
+from datetime import timedelta, datetime
 from enum import Enum
 from termcolor import colored
 from typing import List
@@ -25,9 +28,8 @@ QUIET = False
 EXAMPLE_USAGE = '''
 Examples:
     {0} mysql
-    {0} mitmproxy/mitmproxy
-    {0} -u mitmproxy mitmproxy
-    {0} nginx -n 1.23*alpine*perl*
+    {0} mysql --after 2016 --before 2017
+    {0} nginx --after 2021 --operating-system linux --below 10M --architecture amd64
     {0} nginx -r '1\.2[0-3].*alpine.*perl.*'
     {0} httpd -n '*alpine*' --architecture '*arm64*'
     {0} python -s -r "3\.[67].*alpine.*" --architecture amd64
@@ -86,14 +88,6 @@ def log(message: str, log_type: Log_Type) -> None:
         '[FATAL ERROR]: {}', '[!]: {}', '[!]: {}', '[+]: {}', '[?]: {}'
     ]
     print(colored(custom_fmt[log_type.value].format(message), colors[log_type.value]))
-
-def sizeof_fmt(num: int, suffix="B") -> str:
-    # SOURCE: https://stackoverflow.com/a/1094933/20198921
-    for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
-        if abs(num) < 1024.0:
-            return f"{num:3.1f}{unit}{suffix}"
-        num /= 1024.0
-    return f"{num:.1f}Yi{suffix}"
 
 def retrieve_tags_url(image_name: str, username: str, page=1, page_size=100) -> str:
     url = (
@@ -217,6 +211,23 @@ def parse_args() -> argparse.Namespace:
         help='Specify the output format.'
     )
     parser.add_argument(
+        '-b',
+        '--below',
+        default=None,
+        help='Below the given size.'
+    )
+    parser.add_argument(
+        '--after',
+        default=-math.inf,
+        help='After the given date.\n'+\
+            'Example dates: ("2016", "2016-01", "2016-01-22", "2016-01-22 10", "2016-01-22 10:30:11")'
+    )
+    parser.add_argument(
+        '--before',
+        default=math.inf,
+        help='Before the given date.\n'
+    )
+    parser.add_argument(
         '-v',
         '--verbose',
         action='store_true',
@@ -250,9 +261,21 @@ def parse_args() -> argparse.Namespace:
     args.operating_system = wildcard_match_to_regex(args.operating_system)
     args.architecture = wildcard_match_to_regex(args.architecture)
 
+    if args.below:
+        args.below = humanfriendly.parse_size(args.below)
+
     args.format = Format[args.format.upper()]
     if args.format in [Format.CSV, Format.JSON]:
         args.quiet = True
+
+    if isinstance(args.before, str):
+        if re.match('^[0-9]{4}$', args.before):
+            args.before = args.before + '-01'
+        args.before = time.mktime(ciso8601.parse_datetime(args.before).timetuple())
+    if isinstance(args.after, str):
+        if re.match('^[0-9]{4}$', args.after):
+            args.after = args.after + '-01'
+        args.after = time.mktime(ciso8601.parse_datetime(args.after).timetuple())
 
     VERBOSE = args.verbose
     QUIET = args.quiet
@@ -293,6 +316,29 @@ def filter_os(tags: List[dict], pattern: str) -> List[dict]:
     return [tag for tag in tags if
         re.match(pattern, get_image_os(tag), re.IGNORECASE)]
 
+def filter_date(tags: List[dict], after: float, before: float) -> List[dict]:
+    if after == -math.inf and before == math.inf:
+        return tags
+
+    result = []
+    for tag in tags:
+        push_date: str = get_push_date_from_tag(tag)
+        if push_date is None:
+            continue
+
+        push_date: datetime = ciso8601.parse_datetime(push_date)
+        push_timestamp = time.mktime(push_date.timetuple())
+        if after <= push_timestamp and push_timestamp <= before:
+            result.append(tag)
+    return result
+
+def filter_size(tags: List[dict], size: int) -> List[dict]:
+    if not size:
+        return tags
+
+    return [tag for tag in tags if
+        tag['image_size'] <= size]
+
 def expand_tags(tags: List[dict]) -> List[dict]:
     return [
         {
@@ -302,19 +348,30 @@ def expand_tags(tags: List[dict]) -> List[dict]:
         for tag in tags for image in tag['images']
     ]
 
+def format_date(date: str, strf='%Y-%m-%d') -> str:
+    if not date:
+        return ''
+    return ciso8601.parse_datetime(date).strftime(strf)
+
+def get_push_date_from_tag(tag):
+    # TODO:: What's the difference between image_last_pushed and tag_last_pushed?
+    return tag['image_last_pushed'] if tag['image_last_pushed'] else tag['tag_last_pushed']
+
 def table_print_tags(tags):
     print("")
     print(tabulate.tabulate(map(lambda tag: [
         tag['name'],
         get_image_os(tag),
         get_image_arch(tag),
-        tag['image_last_pushed'] if tag['image_last_pushed'] else tag['tag_last_pushed'],
-        sizeof_fmt(tag['image_size']),
+        humanfriendly.format_size((tag['image_size'])),
+        format_date(tag['image_last_pushed']),
+        format_date(tag['tag_last_pushed']),
         '{}'.format(tag['image_size']),
-        '{}..'.format(tag['image_digest'][:24]) if tag['image_digest'] else ''
+        '{}..'.format(tag['image_digest'][:24]) if tag['image_digest'] else '',
+        tag['image_status']
     ], tags), headers=[
-        'Tag', 'OS', 'Arch', 'Last pushed',
-        'Size', 'Bytes', 'Digest'
+        'Tag', 'OS', 'Arch', 'Size', 'Image pushed',
+        'Tag pushed', 'Bytes', 'Digest', 'Image status'
     ], tablefmt='orgtbl'))
 
 def csv_print_tags(tags):
@@ -342,6 +399,8 @@ def main(args):
     tags = filter_tags(tags, args.regex)
     tags = filter_arch(tags, args.architecture)
     tags = filter_os(tags, args.operating_system)
+    tags = filter_date(tags, after=args.after, before=args.before)
+    tags = filter_size(tags, size=args.below)
     if args.sort:
         tags = sorted(tags, key=lambda tag: int(tag['image_size']))
 
